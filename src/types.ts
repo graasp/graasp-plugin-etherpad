@@ -15,6 +15,6 @@ export interface EtherpadPluginOptions {
 export interface EtherpadExtra extends UnknownExtra {
   etherpad: {
     padID: string;
-    groupID: string;
+    groupID?: string; // if a pad does not have group ID, then it is a public-access pad
   };
 }

@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 
-import { Item } from '@graasp/sdk';
+import { Item, ItemType } from '@graasp/sdk';
 
 import { ETHERPAD_API_VERSION, PLUGIN_NAME } from './constants';
 import { ItemMissingExtraError, ItemNotFoundError } from './errors';
@@ -17,6 +17,45 @@ const publicPlugin: FastifyPluginAsync<EtherpadPluginOptions> = async (fastify, 
   if (!publicPlugin) {
     throw new Error(`${PLUGIN_NAME}: Public plugin was not registered!`);
   }
+
+  /**
+   * This hook ensures that the write ID of an etherpad is never leaked
+   * In non-group pad mode, the padID cannot be given to the end user: this would allow
+   * anyone to edit them. So we need to repalce the actual ID with a read-only ID, because
+   * non-group pads are not authenticated through sessions.
+   * 
+   * Public Graasp item (publicly visible, but read-only to guests)
+   * != non-group pad (publicly visible and editable by guests)
+   * so we need to implement additional logic to make sure that guests can only view pad
+   * and not retrieve the original ID in some way to edit them
+   * (e.g. leakage of etherpad extra)
+   */
+  const getTaskName = publicPlugin.items.taskManager.createGetPublicItemTaskName();
+  taskRunner.setTaskPostHookHandler<Item<EtherpadExtra>>(
+    getTaskName,
+    async (item, actor, { log, handler }) => {
+      // only run when getting etherpad item
+      if (item.type !== ItemType.ETHERPAD) {
+        return;
+      }
+
+      // raise error if extra is missing
+      if (!item.extra.etherpad) {
+        throw new ItemMissingExtraError(item);
+      }
+      const { padID } = item.extra.etherpad;
+
+      // in public mode, always replace the pad id with a read-only id
+      const { readOnlyID } = await etherpad.getReadOnlyID({ padID }, true);
+      // replace content of extra in-place with read-only values
+      item.extra.etherpad = {
+        padID: readOnlyID,
+        groupID: undefined,
+      };
+    },
+  );
+
+  // TODO: do the same for all other get operations
 
   const {
     graaspActor,
